@@ -33,6 +33,12 @@ npm run build
 `npm run build` type-checks and writes a static site to `dist/` with relative paths, so it
 works from any subdirectory.
 
+### Deploy
+
+Pushes to `main` are built and published to GitHub Pages by
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml). One-time setup: in the repo's
+**Settings → Pages**, set **Source** to **GitHub Actions**.
+
 ## How it works
 
 | Piece | Choice |
