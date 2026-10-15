@@ -1,57 +1,17 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { mesh } from 'topojson-client';
-import type { GeometryCollection, Topology } from 'topojson-specification';
-import bordersUrl from 'world-atlas/countries-50m.json?url';
 import type { RoundResult } from './protocol';
 
-const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
-let borders: Promise<GeoJSON.MultiLineString> | null = null;
-
-/** Land borders between countries (Natural Earth 1:50m), fetched once and shared. */
-function loadBorders(): Promise<GeoJSON.MultiLineString> {
-  borders ??= fetch(bordersUrl)
-    .then((res) => res.json())
-    .then((topo: Topology) => {
-      const countries = topo.objects.countries as GeometryCollection;
-      const lines = mesh(topo, countries, (a, b) => a !== b);
-      // Repeat on the neighbouring world copies so borders survive panning past ±180°.
-      const shifted = [-360, 0, 360].flatMap((dx) =>
-        lines.coordinates.map((line) => line.map(([lng, lat]) => [lng + dx, lat])),
-      );
-      return { type: 'MultiLineString', coordinates: shifted };
-    });
-  borders.catch(() => (borders = null)); // allow a retry on the next map
-  return borders;
-}
-
-/**
- * OSM tiles only draw faint borders at low zoom, so overlay crisp ones that stay
- * visible at every zoom. The pane ignores the mouse, so clicks still place pins.
- */
-function addBorders(map: L.Map) {
-  const pane = map.createPane('borders');
-  pane.style.zIndex = '350'; // above tiles (200), below markers (600)
-  pane.style.pointerEvents = 'none';
-  loadBorders()
-    .then((geo) =>
-      L.geoJSON(geo, {
-        pane: 'borders',
-        interactive: false,
-        style: { color: '#2b2140', weight: 1.4, opacity: 0.75 },
-      }).addTo(map),
-    )
-    .catch(() => {
-      /* tiles still show borders when zoomed in */
-    });
-}
+// Humanitarian OSM style: unlike the standard OSM style it draws country
+// borders at every zoom level, which matters most when zoomed out to guess.
+const TILES = 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png';
+const ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, style by <a href="https://www.hotosm.org/">HOT</a>, hosted by <a href="https://openstreetmap.fr/">OSM France</a>';
 
 function baseMap(el: HTMLElement): L.Map {
   const map = L.map(el, { worldCopyJump: true, minZoom: 1, zoomSnap: 0.5 });
-  L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
-  addBorders(map);
+  // HOT's zoom-1 tiles have no borders yet, so fully zoomed out we draw its zoom-2 tiles scaled down.
+  L.tileLayer(TILES, { subdomains: 'abc', minNativeZoom: 2, maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
   return map;
 }
 

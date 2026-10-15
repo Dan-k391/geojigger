@@ -56,7 +56,7 @@ Pushes to `main` are built and published to GitHub Pages by
 | Topology | Star: the host's browser runs the authoritative game logic ([src/host.ts](src/host.ts)); clients send only intents (join, guess, chat). The host's own UI talks to it with the same messages ([src/protocol.ts](src/protocol.ts)). |
 | Imagery | Panoramax 360° pictures, searched by bounding box with no API key ([src/imagery.ts](src/imagery.ts)). A sequence counts as a car view if its uploader tagged it `transport=car`, or if it averages over 30 km/h. The host throws several random "darts" in parallel, keeps the first car view found, and prefetches the next round's location. |
 | Panorama | [Photo Sphere Viewer](https://photo-sphere-viewer.js.org) plus its markers plugin for the movement arrows ([src/pano.ts](src/pano.ts)). |
-| Map | [Leaflet](https://leafletjs.com) with OpenStreetMap tiles ([src/maps.ts](src/maps.ts)). |
+| Map | [Leaflet](https://leafletjs.com) with the Humanitarian OpenStreetMap style, which shows country borders at every zoom ([src/maps.ts](src/maps.ts)). |
 | Scoring | `5000 · e^(−distance / scale)`, where the scale depends on the region size (1,500 km for the world). |
 
 ### Limitations
@@ -73,4 +73,5 @@ Pushes to `main` are built and published to GitHub Pages by
 
 Imagery © [Panoramax](https://panoramax.fr) contributors (CC-BY-SA / Etalab licences; the
 photographer and licence are shown after each round). Map data ©
-[OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
+[OpenStreetMap](https://www.openstreetmap.org/copyright) contributors; map style by
+[HOT](https://www.hotosm.org/), hosted by [OSM France](https://openstreetmap.fr/).
