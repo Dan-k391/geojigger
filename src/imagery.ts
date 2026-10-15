@@ -28,10 +28,11 @@ const B = {
   mexico: { b: [-117, 14, -87, 32], w: 2 },
   centralAm: { b: [-92, 7, -77, 18], w: 1 },
   southAm: { b: [-81, -40, -35, 10], w: 5 },
-  nAfrica: { b: [-17, 20, 35, 37], w: 1 },
-  wAfrica: { b: [-17, 4, 15, 16], w: 1.5 },
-  eAfrica: { b: [28, -12, 45, 12], w: 1.5 },
-  sAfrica: { b: [12, -35, 36, -15], w: 2 },
+  // Panoramax has almost no 360° car coverage in Africa yet; keep a token weight.
+  nAfrica: { b: [-17, 20, 35, 37], w: 0.25 },
+  wAfrica: { b: [-17, 4, 15, 16], w: 0.25 },
+  eAfrica: { b: [28, -12, 45, 12], w: 0.25 },
+  sAfrica: { b: [12, -35, 36, -15], w: 0.5 },
   middleEast: { b: [34, 12, 60, 40], w: 1.5 },
   russia: { b: [30, 50, 90, 62], w: 2 },
   centralAsia: { b: [50, 36, 85, 50], w: 1 },
@@ -45,20 +46,39 @@ const B = {
   nz: { b: [166, -47, 179, -34], w: 1 },
 } satisfies Record<string, { b: Box; w: number }>;
 
+// Country regions are unions of boxes that stay inside the borders, so a
+// "France" round never lands in England or Belgium.
+const FRANCE: { b: Box; w: number }[] = [
+  { b: [-1.2, 43.4, 7.0, 48.3], w: 8 },
+  { b: [-4.8, 47.2, 1.5, 49.0], w: 3 },
+  { b: [1.5, 48.3, 4.3, 50.3], w: 2 },
+  { b: [1.6, 50.3, 2.6, 51.05], w: 0.5 },
+  { b: [4.3, 47.4, 7.5, 49.0], w: 2 },
+  { b: [-0.5, 42.9, 3.1, 43.4], w: 1 },
+  { b: [3.0, 43.1, 7.5, 44.5], w: 2 },
+];
+
+const JAPAN: { b: Box; w: number }[] = [
+  { b: [129.5, 30.9, 132.2, 34.0], w: 2 },
+  { b: [130.8, 33.4, 136.0, 35.7], w: 3 },
+  { b: [134.5, 33.4, 140.95, 37.0], w: 4 },
+  { b: [138.3, 37.0, 142.1, 41.6], w: 3 },
+  { b: [139.3, 41.3, 145.9, 45.6], w: 3 },
+];
+
 export const REGIONS: Region[] = [
   { id: 'world', name: 'World', boxes: Object.values(B), scale: 1500 },
   { id: 'europe', name: 'Europe', boxes: [B.wEurope, B.nEurope, B.uk, B.eEurope], scale: 450 },
-  { id: 'france', name: 'France', boxes: [{ b: [-4.8, 42.4, 8.2, 51.1], w: 1 }], scale: 120 },
+  { id: 'france', name: 'France', boxes: FRANCE, scale: 120 },
   { id: 'namerica', name: 'North America', boxes: [B.usa, B.canada, B.mexico, B.centralAm], scale: 700 },
   { id: 'samerica', name: 'South America', boxes: [B.southAm], scale: 600 },
-  { id: 'africa', name: 'Africa', boxes: [B.nAfrica, B.wAfrica, B.eAfrica, B.sAfrica], scale: 700 },
   {
     id: 'asia',
     name: 'Asia',
     boxes: [B.middleEast, B.russia, B.centralAsia, B.india, B.china, B.seAsia, B.japan, B.korea, B.taiwan],
     scale: 900,
   },
-  { id: 'japan', name: 'Japan', boxes: [B.japan], scale: 180 },
+  { id: 'japan', name: 'Japan', boxes: JAPAN, scale: 180 },
   { id: 'oceania', name: 'Oceania', boxes: [B.australia, B.nz], scale: 450 },
 ];
 
@@ -125,37 +145,96 @@ function intersect(a: Box, b: Box): Box | null {
   return r[0] < r[2] && r[1] < r[3] ? r : null;
 }
 
+// ---------------------------------------------------------------- car filter
+
+interface CollectionInfo {
+  isCar: boolean;
+}
+
+const CAR_TRANSPORT = new Set(['car', 'van', 'truck', 'bus', 'vehicle', 'motor_vehicle', 'taxi']);
+/** Average speed (km/h) above which an untagged sequence is assumed to be driven. */
+const CAR_MIN_KMH = 30;
+
+const collectionCache = new Map<string, Promise<CollectionInfo>>();
+
 /**
- * Picks a random 360° panorama inside the region: throw a dart, then search a
- * growing box around it until something turns up. `avoid` holds collection
- * (sequence) ids already used this game, so rounds don't land on the same road.
+ * Whether a sequence was shot from a car, like official Street View coverage.
+ * Uses the uploader's `transport` tag when present, otherwise the average speed
+ * (walking and cycling sequences stay well under 25 km/h, cars sit at 40+).
+ * Single photospheres and short handheld sequences are rejected.
+ */
+function collectionInfo(id: string): Promise<CollectionInfo> {
+  let p = collectionCache.get(id);
+  if (!p) {
+    p = fetch(`${API}/collections/${id}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((c): CollectionInfo => {
+        const transport = (c.semantics ?? [])
+          .find((x: { key: string }) => x.key === 'transport')
+          ?.value?.trim()
+          .toLowerCase();
+        if (transport) return { isCar: CAR_TRANSPORT.has(transport) };
+        const km = Number(c['geovisio:length_km']) || 0;
+        const count = Number(c['stats:items']?.count) || 0;
+        const [from, to] = c.extent?.temporal?.interval?.[0] ?? [];
+        const hours = (Date.parse(to) - Date.parse(from)) / 3_600_000;
+        if (count < 20 || km < 0.5 || !(hours > 0)) return { isCar: false };
+        return { isCar: km / hours >= CAR_MIN_KMH };
+      });
+    // Don't cache network failures, so a later lookup can retry.
+    p.catch(() => collectionCache.delete(id));
+    collectionCache.set(id, p);
+  }
+  return p;
+}
+
+async function carCollections(ids: Iterable<string>): Promise<Set<string>> {
+  const unique = [...new Set(ids)];
+  const verdicts = await Promise.all(unique.map((id) => collectionInfo(id).then((i) => i.isCar, () => false)));
+  return new Set(unique.filter((_, i) => verdicts[i]));
+}
+
+// ---------------------------------------------------------------- locations
+
+/** One dart: a random point in the region, then growing searches around it. */
+async function tryDart(region: Region, avoid: Set<string>, signal: AbortSignal): Promise<Loc | null> {
+  const { b } = weightedPick(region.boxes);
+  const lng = rand(b[0], b[2]);
+  const lat = rand(b[1], b[3]);
+  for (const r of [1, 4]) {
+    const box = intersect([lng - r, lat - r, lng + r, lat + r], b);
+    if (!box) continue;
+    const locs = (await search(box, 30, signal)).map(toLoc).filter((l): l is Loc => !!l && !avoid.has(l.collection));
+    if (!locs.length || signal.aborted) continue;
+    const cars = await carCollections(locs.map((l) => l.collection));
+    const hits = locs.filter((l) => cars.has(l.collection));
+    if (hits.length) return hits[Math.floor(Math.random() * hits.length)];
+  }
+  return null;
+}
+
+/**
+ * Picks a random car-view panorama inside the region. Several darts fly in
+ * parallel (most land on empty land or walking/cycling uploads); the first one
+ * that finds a driven sequence wins and the rest are cancelled. `avoid` holds
+ * collection (sequence) ids already used this game, so rounds don't repeat roads.
  */
 export async function pickLocation(region: Region, avoid: Set<string>): Promise<Loc> {
-  for (let attempt = 0; attempt < 25; attempt++) {
-    const { b } = weightedPick(region.boxes);
-    const lng = rand(b[0], b[2]);
-    const lat = rand(b[1], b[3]);
-    for (const r of [0.25, 1.5, 5]) {
-      const box = intersect([lng - r, lat - r, lng + r, lat + r], b);
-      if (!box) continue;
-      let features: Feature[];
-      try {
-        features = await search(box, 40);
-      } catch {
-        continue; // transient network error: try another dart
+  const ctrl = new AbortController();
+  let found: Loc | null = null;
+  let darts = 0;
+  const worker = async () => {
+    while (!found && darts++ < 60) {
+      const loc = await tryDart(region, avoid, ctrl.signal).catch(() => null);
+      if (loc && !found) {
+        found = loc;
+        ctrl.abort();
       }
-      const locs = features.map(toLoc).filter((l): l is Loc => !!l && !avoid.has(l.collection));
-      if (!locs.length) continue;
-      // Prefer pictures that belong to a sequence (several shots of the same
-      // collection nearby), so there is somewhere to walk to.
-      const perCollection = new Map<string, number>();
-      for (const l of locs) perCollection.set(l.collection, (perCollection.get(l.collection) ?? 0) + 1);
-      const walkable = locs.filter((l) => perCollection.get(l.collection)! >= 3);
-      const pool = walkable.length ? walkable : locs;
-      return pool[Math.floor(Math.random() * pool.length)];
     }
-  }
-  throw new Error('Could not find any imagery. Check your connection or try another region.');
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  if (!found) throw new Error('Could not find any street imagery. Check your connection or try another region.');
+  return found;
 }
 
 export interface Neighbor {
@@ -165,20 +244,36 @@ export interface Neighbor {
   dist: number;
 }
 
-/** Nearby panoramas to walk to, at most one per 45° sector (the closest). */
+/** Smallest angle between two bearings, 0–180°. */
+export const angleDiff = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
+
+/**
+ * Where you can drive to from here, like Street View's arrows: the nearest car
+ * picture in each distinct direction (forward and back along the road, plus side
+ * roads at junctions). Pictures from walking or cycling sequences are skipped.
+ */
 export async function findNeighbors(from: Loc, signal?: AbortSignal): Promise<Neighbor[]> {
-  const d = 0.0007; // ~75 m
-  const features = await search([from.lng - d, from.lat - d, from.lng + d, from.lat + d], 80, signal);
-  const best = new Map<number, Neighbor>();
+  const d = 0.0005; // ~55 m
+  const features = await search([from.lng - d, from.lat - d, from.lng + d, from.lat + d], 100, signal);
+  const candidates: Neighbor[] = [];
   for (const f of features) {
     const loc = toLoc(f);
     if (!loc || loc.id === from.id) continue;
     const dist = haversine(from.lat, from.lng, loc.lat, loc.lng) * 1000;
-    if (dist < 2 || dist > 70) continue;
-    const brg = bearing(from.lat, from.lng, loc.lat, loc.lng);
-    const sector = Math.round(brg / 45) % 8;
-    const cur = best.get(sector);
-    if (!cur || dist < cur.dist) best.set(sector, { loc, bearing: brg, dist });
+    if (dist < 3 || dist > 45) continue;
+    candidates.push({ loc, bearing: bearing(from.lat, from.lng, loc.lat, loc.lng), dist });
   }
-  return [...best.values()];
+  const cars = await carCollections(candidates.map((c) => c.loc.collection).filter((c) => c !== from.collection));
+  cars.add(from.collection);
+  const arrows: Neighbor[] = [];
+  // Closest first; a farther picture only gets its own arrow if it points
+  // somewhere clearly different (a crossing road rather than the same lane).
+  candidates.sort((a, b) => a.dist - b.dist);
+  for (const c of candidates) {
+    if (!cars.has(c.loc.collection)) continue;
+    if (arrows.every((a) => angleDiff(a.bearing, c.bearing) >= 50)) arrows.push(c);
+    if (arrows.length >= 6) break;
+  }
+  return arrows;
 }
+

@@ -17,6 +17,9 @@ interface Player {
 /** `to === null` means broadcast to everyone, including the host's own UI. */
 export type Send = (to: string | null, msg: HostMsg) => void;
 
+/** Once someone guesses, everyone else has at most this long to follow. */
+export const GUESS_COUNTDOWN = 15;
+
 export const DEFAULT_SETTINGS: Settings = { rounds: 5, time: 120, move: 'move', region: 'world' };
 
 export class HostGame {
@@ -28,7 +31,8 @@ export class HostGame {
   private nextLoc: Promise<Loc> | null = null;
   private usedCollections = new Set<string>();
   private guesses = new Map<string, { lat: number; lng: number }>();
-  private roundStart = 0;
+  /** When the round ends (ms, host clock), null for untimed rounds. */
+  private deadline: number | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastReveal: HostMsg | null = null;
   private lastFinal: HostMsg | null = null;
@@ -148,13 +152,21 @@ export class HostGame {
     this.round++;
     this.guesses.clear();
     this.phase = 'round';
-    this.roundStart = Date.now();
     this.nextLoc = this.round < this.settings.rounds ? this.prefetch() : null;
+    this.setDeadline(this.settings.time > 0 ? Date.now() + this.settings.time * 1000 : null);
     this.broadcastState();
     this.send(null, this.roundMsg());
+  }
+
+  private setDeadline(deadline: number | null) {
+    this.deadline = deadline;
     clearTimeout(this.timer);
     // A little grace so guesses auto-submitted at 0:00 still arrive.
-    if (this.settings.time > 0) this.timer = setTimeout(() => this.endRound(), (this.settings.time + 2) * 1000);
+    if (deadline !== null) this.timer = setTimeout(() => this.endRound(), deadline - Date.now() + 2000);
+  }
+
+  private remaining(): number | null {
+    return this.deadline === null ? null : Math.max(0, (this.deadline - Date.now()) / 1000);
   }
 
   private roundMsg(): HostMsg {
@@ -163,8 +175,7 @@ export class HostGame {
       round: this.round,
       rounds: this.settings.rounds,
       loc: this.loc!,
-      time: this.settings.time,
-      elapsed: (Date.now() - this.roundStart) / 1000,
+      remaining: this.remaining(),
       move: this.settings.move,
       region: this.settings.region,
     };
@@ -176,6 +187,12 @@ export class HostGame {
     this.guesses.set(from, { lat, lng: ((((lng + 180) % 360) + 360) % 360) - 180 });
     this.broadcastState();
     this.maybeEndRound();
+    // First guess in: everyone else gets a short countdown (unless less time is left anyway).
+    const left = this.remaining();
+    if (this.phase === 'round' && (left === null || left > GUESS_COUNTDOWN)) {
+      this.setDeadline(Date.now() + GUESS_COUNTDOWN * 1000);
+      this.send(null, { t: 'timer', round: this.round, remaining: GUESS_COUNTDOWN, by: from });
+    }
   }
 
   private maybeEndRound() {

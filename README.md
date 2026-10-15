@@ -10,10 +10,19 @@ static files anywhere (GitHub Pages, Netlify, an S3 bucket, `python -m http.serv
 1. One player clicks **Create a game** and shares the room code or invite link.
 2. Friends open the link (or type the code) and click **Join**.
 3. The host picks the region, rounds, time limit and mode, then starts.
-4. Look around the 360° panorama, walk with the arrows on the ground, then drop a pin
-   on the map and hit **Guess** (or press Space). Up to 5,000 points per round.
+4. Look around the 360° panorama and drive along the road, then drop a pin on the map
+   and hit **Guess** (or press Space). Up to 5,000 points per round.
+5. As soon as anyone guesses, everyone else has **15 seconds** left.
 
-Modes: **Moving** (walk along the image sequence), **No move** (look around only),
+Like GeoGuessr, every location is car-mounted street-level imagery: walking, cycling and
+handheld photosphere uploads are filtered out.
+
+Controls: click the arrows or the road to move, or use **↑/W** and **↓/S**; **←/→** turn.
+Hover the map to expand it, drag its top-left corner to resize it, and pin it to keep it
+open (size and pin are remembered). Pictures load fast in standard definition, then
+sharpen to HD; the **HD** button turns that off on slow connections.
+
+Modes: **Moving** (drive along the road), **No move** (look around only),
 **NMPZ** (no moving, panning or zooming).
 
 ## Develop
@@ -45,7 +54,7 @@ Pushes to `main` are built and published to GitHub Pages by
 | --- | --- |
 | Networking | [PeerJS](https://peerjs.com) (WebRTC data channels). The free public PeerJS server is used only for the initial handshake; all game traffic is peer to peer. |
 | Topology | Star: the host's browser runs the authoritative game logic ([src/host.ts](src/host.ts)); clients send only intents (join, guess, chat). The host's own UI talks to it with the same messages ([src/protocol.ts](src/protocol.ts)). |
-| Imagery | Panoramax 360° pictures, searched by bounding box with no API key ([src/imagery.ts](src/imagery.ts)). The host picks each location and prefetches the next one during the round. |
+| Imagery | Panoramax 360° pictures, searched by bounding box with no API key ([src/imagery.ts](src/imagery.ts)). A sequence counts as a car view if its uploader tagged it `transport=car`, or if it averages over 30 km/h. The host throws several random "darts" in parallel, keeps the first car view found, and prefetches the next round's location. |
 | Panorama | [Photo Sphere Viewer](https://photo-sphere-viewer.js.org) plus its markers plugin for the movement arrows ([src/pano.ts](src/pano.ts)). |
 | Map | [Leaflet](https://leafletjs.com) with OpenStreetMap tiles ([src/maps.ts](src/maps.ts)). |
 | Scoring | `5000 · e^(−distance / scale)`, where the scale depends on the region size (1,500 km for the world). |
@@ -57,7 +66,8 @@ Pushes to `main` are built and published to GitHub Pages by
   to), so a determined player could cheat with the dev tools. It's a game for friends.
 - Very strict NATs or firewalls can block WebRTC; PeerJS falls back to its public TURN relay
   where it can.
-- Panoramax coverage is densest in Europe (especially France), so "World" rounds lean that way.
+- Panoramax's 360° car coverage is densest in Europe and North America, and almost absent in
+  Africa, so "World" rounds lean that way.
 
 ## Credits
 

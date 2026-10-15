@@ -46,7 +46,24 @@ let timerHandle: ReturnType<typeof setInterval> | undefined;
 let pano: Pano | null = null;
 let guessMap: GuessMap | null = null;
 let resultMap: ResultMap | null = null;
-let hd = false;
+let hd = readPref('geojigger-hd', true);
+
+function readPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 const SCREENS = ['home', 'lobby', 'game', 'reveal', 'final'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -181,6 +198,8 @@ function onMessage(msg: HostMsg) {
       return onState(msg);
     case 'round':
       return onRound(msg);
+    case 'timer':
+      return onTimer(msg);
     case 'reveal':
       return onReveal(msg);
     case 'final':
@@ -301,6 +320,7 @@ function ensureGameWidgets() {
     const needle = $('compass-needle');
     pano.onHeading = (d) => (needle.style.transform = `rotate(${-d}deg)`);
     pano.onError = () => toast('Could not load this panorama. Try the HD toggle or wait for the round to end.', 6000);
+    pano.setHd(hd);
   }
   if (!guessMap) {
     guessMap = new GuessMap($('guess-map'));
@@ -322,13 +342,21 @@ function onRound(msg: RoundMsg) {
   $('hud-round').textContent = `${msg.round} / ${msg.rounds}`;
   $('hud-score').textContent = (me()?.total ?? 0).toLocaleString();
   $('btn-return').hidden = msg.move !== 'move';
-  guessPanel.classList.remove('open', 'pinned');
+  guessPanel.classList.remove('open', 'guessed');
   mapToggle.classList.remove('open');
   mapToggle.textContent = 'Map';
   void pano!.show(msg.loc, msg.move);
   guessMap!.color = me()?.color ?? '#22c55e';
   guessMap!.reset(regionBounds(getRegion(msg.region)));
-  startTimer(msg.time, msg.elapsed);
+  startTimer(msg.remaining);
+}
+
+function onTimer(msg: Extract<HostMsg, { t: 'timer' }>) {
+  if (msg.round !== round?.round) return;
+  startTimer(msg.remaining);
+  if (msg.by === session?.myId) return toast(`Everyone else now has ${msg.remaining} seconds!`);
+  const name = state?.players.find((p) => p.id === msg.by)?.name ?? 'Someone';
+  if (!guessed) toast(`${name} guessed — ${msg.remaining} seconds left!`);
 }
 
 function submitGuess() {
@@ -336,7 +364,7 @@ function submitGuess() {
   if (!g || guessed || !round || !session) return;
   guessed = true;
   guessMap!.lock();
-  guessPanel.classList.add('pinned');
+  guessPanel.classList.add('guessed');
   session.send({ t: 'guess', round: round.round, lat: g.lat, lng: g.lng });
   guessBtn.disabled = true;
   guessBtn.textContent = 'Waiting for others…';
@@ -362,22 +390,73 @@ $('btn-exit').addEventListener('click', () => {
   const warning = session?.isHost ? 'Leave? You are the host, so this ends the game for everyone.' : 'Leave this game?';
   if (confirm(warning)) leave();
 });
-$('btn-hd').addEventListener('click', (e) => {
+const hdBtn = $('btn-hd');
+hdBtn.classList.toggle('on', hd);
+hdBtn.addEventListener('click', () => {
   hd = !hd;
-  (e.currentTarget as HTMLElement).classList.toggle('on', hd);
+  writePref('geojigger-hd', hd);
+  hdBtn.classList.toggle('on', hd);
   pano?.setHd(hd);
 });
 
-function startTimer(time: number, elapsed: number) {
+// Guess map: drag the corner handle to resize it (remembered), pin to keep it open.
+const pinBtn = $('btn-pin');
+function setMapSize(w: number, h: number) {
+  guessPanel.style.setProperty('--map-w', `${Math.round(w)}px`);
+  guessPanel.style.setProperty('--map-h', `${Math.round(h)}px`);
+}
+const savedSize = readPref<[number, number] | null>('geojigger-map-size', null);
+if (savedSize) setMapSize(...savedSize);
+guessPanel.classList.toggle('pinned', readPref('geojigger-map-pinned', false));
+pinBtn.classList.toggle('on', guessPanel.classList.contains('pinned'));
+pinBtn.addEventListener('click', () => {
+  const pinned = guessPanel.classList.toggle('pinned');
+  pinBtn.classList.toggle('on', pinned);
+  writePref('geojigger-map-pinned', pinned);
+});
+
+const resizeHandle = $('map-resize');
+resizeHandle.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  resizeHandle.setPointerCapture(e.pointerId);
+  const rect = guessPanel.getBoundingClientRect();
+  const start = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
+  let size: [number, number] = [rect.width, rect.height];
+  guessPanel.classList.add('resizing');
+  let frame = 0;
+  const move = (ev: PointerEvent) => {
+    // The panel is anchored bottom-right, so dragging up/left grows it.
+    size = [
+      Math.min(innerWidth - 32, Math.max(260, start.w + start.x - ev.clientX)),
+      Math.min(innerHeight - 32, Math.max(200, start.h + start.y - ev.clientY)),
+    ];
+    setMapSize(...size);
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => guessMap?.map.invalidateSize());
+  };
+  const end = () => {
+    resizeHandle.removeEventListener('pointermove', move);
+    resizeHandle.removeEventListener('pointerup', end);
+    resizeHandle.removeEventListener('pointercancel', end);
+    guessPanel.classList.remove('resizing');
+    writePref('geojigger-map-size', size);
+    guessMap?.resize();
+  };
+  resizeHandle.addEventListener('pointermove', move);
+  resizeHandle.addEventListener('pointerup', end);
+  resizeHandle.addEventListener('pointercancel', end);
+});
+
+function startTimer(remaining: number | null) {
   stopTimer();
   const box = $('hud-timer-box');
-  box.hidden = time === 0;
-  if (time === 0) return;
-  deadline = Date.now() + (time - elapsed) * 1000;
+  box.hidden = remaining === null;
+  if (remaining === null) return;
+  deadline = Date.now() + remaining * 1000;
   const tick = () => {
     const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     $('hud-timer').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-    box.classList.toggle('low', left <= 10);
+    box.classList.toggle('low', left <= 15);
     if (left === 0) {
       stopTimer();
       if (!guessed) {

@@ -58,7 +58,10 @@ export interface Standing {
 
 export type HostMsg =
   | { t: 'state'; hostId: string; phase: Phase; settings: Settings; players: PlayerInfo[]; round: number }
-  | { t: 'round'; round: number; rounds: number; loc: Loc; time: number; elapsed: number; move: MoveMode; region: string }
+  /** `remaining`: seconds left from the moment of sending, null when untimed. */
+  | { t: 'round'; round: number; rounds: number; loc: Loc; remaining: number | null; move: MoveMode; region: string }
+  /** The round clock changed, e.g. someone guessed and everyone else now has 15 s. */
+  | { t: 'timer'; round: number; remaining: number; by: string /* player id */ }
   | { t: 'reveal'; round: number; rounds: number; loc: Loc; results: RoundResult[] }
   | { t: 'final'; standings: Standing[] }
   | { t: 'chat'; name: string; color: string; text: string }
