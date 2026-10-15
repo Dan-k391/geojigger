@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeoJigger</title>
+    <meta name="description" content="Peer-to-peer geography guessing game that runs entirely in your browser." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>" />
+  </head>
+  <body>
+    <!-- Home -->
+    <section id="screen-home" class="screen center">
+      <div class="card home-card">
+        <h1 class="logo">Geo<span>Jigger</span></h1>
+        <p class="tagline">Drop into a random street. Guess where you are. Play with friends, peer to peer.</p>
+        <label class="field">
+          <span>Your name</span>
+          <input id="name" maxlength="20" placeholder="Explorer" autocomplete="nickname" />
+        </label>
+        <button id="btn-create" class="btn primary big">Create a game</button>
+        <div class="divider"><span>or join one</span></div>
+        <form id="join-form" class="join-row">
+          <input id="join-code" maxlength="8" placeholder="ROOM CODE" autocomplete="off" spellcheck="false" />
+          <button class="btn" type="submit">Join</button>
+        </form>
+        <p id="home-status" class="status"></p>
+      </div>
+      <p class="footnote">
+        Imagery from <a href="https://panoramax.fr" target="_blank" rel="noopener">Panoramax</a> contributors ·
+        maps &copy; OpenStreetMap contributors · P2P via WebRTC
+      </p>
+    </section>
+
+    <!-- Lobby -->
+    <section id="screen-lobby" class="screen center" hidden>
+      <div class="lobby">
+        <div class="card">
+          <div class="room-head">
+            <div>
+              <div class="muted small">Room code</div>
+              <div id="room-code" class="room-code"></div>
+            </div>
+            <button id="btn-copy" class="btn">Copy invite link</button>
+          </div>
+          <h3>Players</h3>
+          <ul id="lobby-players" class="player-list"></ul>
+          <h3>Settings</h3>
+          <div class="settings">
+            <label class="field"><span>Region</span><select id="set-region"></select></label>
+            <label class="field">
+              <span>Rounds</span>
+              <select id="set-rounds">
+                <option>1</option><option>3</option><option selected>5</option><option>10</option><option>15</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Time per round</span>
+              <select id="set-time">
+                <option value="30">30 s</option><option value="60">1 min</option><option value="120" selected>2 min</option>
+                <option value="180">3 min</option><option value="300">5 min</option><option value="0">Unlimited</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Mode</span>
+              <select id="set-move">
+                <option value="move">Moving</option><option value="nomove">No move</option><option value="nmpz">NMPZ</option>
+              </select>
+            </label>
+          </div>
+          <div class="lobby-actions">
+            <button id="btn-leave" class="btn ghost">Leave</button>
+            <button id="btn-start" class="btn primary big">Start game</button>
+            <p id="lobby-wait" class="muted">Waiting for the host to start…</p>
+          </div>
+        </div>
+        <div class="card chat">
+          <h3>Chat</h3>
+          <ul id="chat-log" class="chat-log"></ul>
+          <form id="chat-form" class="chat-row">
+            <input id="chat-input" maxlength="300" placeholder="Say something…" autocomplete="off" />
+            <button class="btn" type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Round -->
+    <section id="screen-game" class="screen" hidden>
+      <div id="pano"></div>
+      <div class="hud hud-top">
+        <div class="hud-box"><span class="muted">Round</span> <b id="hud-round"></b></div>
+        <div class="hud-box"><span class="muted">Score</span> <b id="hud-score"></b></div>
+        <div class="hud-box" id="hud-timer-box"><span class="muted">Time</span> <b id="hud-timer"></b></div>
+      </div>
+      <ul id="hud-players" class="hud hud-players"></ul>
+      <div class="hud hud-tools">
+        <div id="compass" class="compass" title="Compass"><div id="compass-needle">N</div></div>
+        <button id="btn-return" class="btn round-btn" title="Back to start">⟲</button>
+        <button id="btn-hd" class="btn round-btn" title="Toggle HD imagery">HD</button>
+        <button id="btn-exit" class="btn round-btn" title="Leave game">✕</button>
+      </div>
+      <button id="btn-map" class="btn primary map-toggle">Map</button>
+      <div id="guess-panel" class="guess-panel">
+        <div id="guess-map"></div>
+        <button id="btn-guess" class="btn primary" disabled>Place your pin</button>
+      </div>
+      <div id="loading" class="loading" hidden>
+        <div class="spinner"></div>
+        <p id="loading-text">Finding a place on Earth…</p>
+      </div>
+      <div class="pano-credit">Imagery &copy; Panoramax contributors</div>
+    </section>
+
+    <!-- Reveal -->
+    <section id="screen-reveal" class="screen" hidden>
+      <div id="result-map"></div>
+      <div class="result-panel card">
+        <h2 id="reveal-title"></h2>
+        <p id="reveal-sub" class="muted small"></p>
+        <table class="results">
+          <thead><tr><th></th><th>Player</th><th>Distance</th><th>Points</th><th>Total</th></tr></thead>
+          <tbody id="reveal-body"></tbody>
+        </table>
+        <div class="reveal-actions">
+          <button id="btn-next" class="btn primary big">Next round</button>
+          <p id="reveal-wait" class="muted">Waiting for the host…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final -->
+    <section id="screen-final" class="screen center" hidden>
+      <div class="card final-card">
+        <h2>Final standings</h2>
+        <ol id="final-list" class="final-list"></ol>
+        <div class="final-actions">
+          <button id="btn-again" class="btn primary big">Play again</button>
+          <button id="btn-to-lobby" class="btn">Back to lobby</button>
+          <button id="btn-quit" class="btn ghost">Leave</button>
+          <p id="final-wait" class="muted">Waiting for the host…</p>
+        </div>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
