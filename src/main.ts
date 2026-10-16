@@ -4,7 +4,8 @@ import { HostGame } from './host';
 import type { ClientMsg, HostMsg, PlayerInfo, Settings } from './protocol';
 import { REGIONS, getRegion, regionBounds } from './imagery';
 import { Pano } from './pano';
-import { GuessMap, ResultMap } from './maps';
+import { GuessMap, RecapMap, ResultMap } from './maps';
+import { placeName } from './places';
 import { formatDistance } from './geo';
 
 type StateMsg = Extract<HostMsg, { t: 'state' }>;
@@ -544,31 +545,97 @@ $('btn-next').addEventListener('click', () => session?.send({ t: 'next' }));
 // ---------------------------------------------------------------- final
 
 const MEDALS = ['🥇', '🥈', '🥉'];
+let recapMap: RecapMap | null = null;
+let recapRows: HTMLElement[] = [];
+
+function selectRound(index: number | null) {
+  recapRows.forEach((row, i) => row.classList.toggle('active', i === index));
+  if (index !== null) recapRows[index]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  recapMap?.focus(index);
+}
 
 function onFinal(msg: FinalMsg) {
   showScreen('final');
+  const { standings, history } = msg;
+
   $('final-list').replaceChildren(
-    ...msg.standings.map((s, i) =>
-      el(
+    ...standings.map((s, i) => {
+      // Per-player stats over the rounds they actually guessed in.
+      const dists = history.map((h) => h.results.find((r) => r.id === s.id)?.dist).filter((d): d is number => d != null);
+      const avg = dists.length ? dists.reduce((a, b) => a + b, 0) / dists.length : null;
+      const best = Math.max(0, ...s.scores);
+      const stats = [avg === null ? 'no guesses' : `avg ${formatDistance(avg)}`, `best ${best.toLocaleString()}`].join(' · ');
+      return el(
         'li',
-        {},
+        { className: s.id === session?.myId ? 'me' : '' },
         el('span', { className: 'place', textContent: MEDALS[i] ?? String(i + 1) }),
         el(
           'div',
           {},
           el('div', {}, swatch(s.color), ' ', el('b', { textContent: s.name + (s.id === session?.myId ? ' (you)' : '') })),
-          el('div', { className: 'rounds', textContent: s.scores.map((x) => x.toLocaleString()).join(' · ') }),
+          el('div', { className: 'rounds', textContent: stats }),
         ),
         el('span', { className: 'pts', textContent: s.total.toLocaleString() }),
-      ),
-    ),
+      );
+    }),
   );
+
+  recapRows = history.map((h, i) => {
+    const title = el('b', { textContent: `Round ${h.round}` });
+    void placeName(h.loc.id, h.loc.lat, h.loc.lng).then((name) => name && (title.textContent = name));
+    const top = Math.max(...h.results.map((r) => r.score));
+    const cells = h.results.flatMap((r) => [
+      swatch(r.color),
+      el('span', { textContent: r.name }),
+      el('span', { className: 'dist', textContent: r.dist == null ? 'no guess' : formatDistance(r.dist) }),
+      el('span', {
+        className: `pts${r.score === top && top > 0 ? ' best' : ''}`,
+        textContent: (r.score === top && top > 0 ? '★ ' : '') + r.score.toLocaleString(),
+      }),
+    ]);
+    const row = el(
+      'li',
+      { className: 'recap-round' },
+      el(
+        'div',
+        { className: 'recap-title' },
+        el('span', { className: 'round-no', textContent: String(h.round) }),
+        title,
+        el('a', {
+          href: `https://www.openstreetmap.org/?mlat=${h.loc.lat}&mlon=${h.loc.lng}#map=16/${h.loc.lat}/${h.loc.lng}`,
+          target: '_blank',
+          rel: 'noopener',
+          textContent: 'map ↗',
+          title: 'Open this spot on OpenStreetMap',
+        }),
+      ),
+      el('div', { className: 'recap-results' }, ...cells),
+    );
+    row.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) return;
+      selectRound(row.classList.contains('active') ? null : i);
+    });
+    return row;
+  });
+  $('recap-rounds').replaceChildren(...recapRows);
+
   const isHost = !!session?.isHost;
   $('btn-again').hidden = !isHost;
   $('btn-to-lobby').hidden = !isHost;
   $('final-wait').hidden = isHost;
+
+  if (!recapMap) {
+    // On wide screens the panel floats over the right of the map; keep markers clear of it.
+    const panel = document.querySelector<HTMLElement>('.recap-panel')!;
+    recapMap = new RecapMap($('recap-map'), () =>
+      getComputedStyle(panel).position === 'absolute' ? panel.offsetWidth + 16 : 0,
+    );
+    recapMap.onSelect = (i) => selectRound(i);
+  }
+  recapMap.show(history);
 }
 
+$('btn-all-rounds').addEventListener('click', () => selectRound(null));
 $('btn-again').addEventListener('click', () => session?.send({ t: 'start' }));
 $('btn-to-lobby').addEventListener('click', () => session?.send({ t: 'lobby' }));
 $('btn-quit').addEventListener('click', leave);

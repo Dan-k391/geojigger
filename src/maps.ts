@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { RoundResult } from './protocol';
+import type { RoundRecap, RoundResult } from './protocol';
 
 // Humanitarian OSM style: unlike the standard OSM style it draws country
 // borders at every zoom level, which matters most when zoomed out to guess.
@@ -110,5 +110,87 @@ export class ResultMap {
 
   invalidate() {
     this.map.invalidateSize();
+  }
+}
+
+/** End-of-game map: every round's true spot (numbered) with everyone's guesses. */
+export class RecapMap {
+  private map: L.Map;
+  private layer = L.layerGroup();
+  private roundBounds: L.LatLngBounds[] = [];
+  private allBounds: L.LatLngBounds | null = null;
+  private flags: HTMLElement[] = [];
+  private selected: number | null = null;
+  onSelect: (index: number) => void = () => {};
+
+  /** `rightPad`: pixels of the map currently covered by a side panel, kept clear of markers. */
+  constructor(
+    el: HTMLElement,
+    private rightPad: () => number = () => 0,
+  ) {
+    // flyToBounds needs a starting view to animate from.
+    this.map = baseMap(el).setView([20, 0], 2);
+    this.layer.addTo(this.map);
+    // Re-frame after window resizes, rotation, or the layout switching to mobile.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        this.map.invalidateSize();
+        if (this.allBounds) this.focus(this.selected, false);
+      }, 100);
+    }).observe(el);
+  }
+
+  show(history: RoundRecap[]) {
+    this.layer.clearLayers();
+    this.roundBounds = [];
+    this.allBounds = null;
+    this.flags = [];
+    this.map.invalidateSize();
+    history.forEach((h, i) => {
+      const target = L.latLng(h.loc.lat, h.loc.lng);
+      const points = [target];
+      for (const r of h.results) {
+        if (!r.guess) continue;
+        let lng = r.guess.lng;
+        while (lng - target.lng > 180) lng -= 360;
+        while (target.lng - lng > 180) lng += 360;
+        const g = L.latLng(r.guess.lat, lng);
+        points.push(g);
+        L.polyline([g, target], { color: r.color, weight: 2, opacity: 0.7, dashArray: '5 6' }).addTo(this.layer);
+        L.marker(g, { icon: pin(r.color, r.name.slice(0, 1).toUpperCase()) })
+          .bindTooltip(`${r.name} · round ${h.round}`)
+          .addTo(this.layer);
+      }
+      const marker = L.marker(target, {
+        icon: L.divIcon({
+          className: 'pin',
+          html: `<div class="pin-round">${h.round}</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        }),
+        zIndexOffset: 1000,
+      })
+        .on('click', () => this.onSelect(i))
+        .addTo(this.layer);
+      this.flags.push(marker.getElement()!);
+      const bounds = L.latLngBounds(points);
+      this.roundBounds.push(bounds);
+      this.allBounds = this.allBounds ? this.allBounds.extend(bounds) : L.latLngBounds(points);
+    });
+    this.focus(null, false);
+  }
+
+  /** Zoom to one round (null = all rounds) and highlight its marker. */
+  focus(index: number | null, animate = true) {
+    this.selected = index;
+    this.flags.forEach((f, i) => f?.firstElementChild?.classList.toggle('active', i === index));
+    const bounds = index === null ? this.allBounds : this.roundBounds[index];
+    if (!bounds) return;
+    if (bounds.getNorthEast().equals(bounds.getSouthWest())) return void this.map.setView(bounds.getCenter(), 8);
+    const options = { paddingTopLeft: [40, 40] as L.PointTuple, paddingBottomRight: [this.rightPad() + 40, 40] as L.PointTuple, maxZoom: 12 };
+    if (animate) this.map.flyToBounds(bounds, { ...options, duration: 0.6 });
+    else this.map.fitBounds(bounds, { ...options, animate: false });
   }
 }

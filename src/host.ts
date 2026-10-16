@@ -1,6 +1,6 @@
 // Authoritative game logic. Runs only in the host's browser; the host's own UI
 // talks to it through the same message types as remote players.
-import type { ClientMsg, HostMsg, Loc, Phase, PlayerInfo, RoundResult, Settings, Standing } from './protocol';
+import type { ClientMsg, HostMsg, Loc, Phase, PlayerInfo, RoundRecap, RoundResult, Settings, Standing } from './protocol';
 import { getRegion, pickLocation } from './imagery';
 import { haversine, score } from './geo';
 
@@ -36,6 +36,8 @@ export class HostGame {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastReveal: HostMsg | null = null;
   private lastFinal: HostMsg | null = null;
+  /** Every finished round of the current game, for the recap. */
+  private history: RoundRecap[] = [];
   /** Bumped whenever the game restarts, so stale async round setups bail out. */
   private gen = 0;
 
@@ -121,6 +123,7 @@ export class HostGame {
       else p.scores = [];
     }
     this.round = 0;
+    this.history = [];
     this.usedCollections.clear();
     this.nextLoc = this.prefetch();
     this.startRound();
@@ -215,6 +218,7 @@ export class HostGame {
     });
     results.sort((a, b) => b.score - a.score);
     this.phase = 'reveal';
+    this.history.push({ round: this.round, loc, results });
     this.lastReveal = { t: 'reveal', round: this.round, rounds: this.settings.rounds, loc, results };
     this.broadcastState();
     this.send(null, this.lastReveal);
@@ -225,7 +229,7 @@ export class HostGame {
     const standings: Standing[] = [...this.players.values()]
       .map((p) => ({ id: p.id, name: p.name, color: p.color, total: sum(p.scores), scores: p.scores }))
       .sort((a, b) => b.total - a.total);
-    this.lastFinal = { t: 'final', standings };
+    this.lastFinal = { t: 'final', standings, history: this.history };
     this.broadcastState();
     this.send(null, this.lastFinal);
   }

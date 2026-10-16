@@ -56,6 +56,13 @@ export interface Standing {
   scores: number[];
 }
 
+/** One finished round, kept for the end-of-game recap. */
+export interface RoundRecap {
+  round: number;
+  loc: Loc;
+  results: RoundResult[];
+}
+
 export type HostMsg =
   | { t: 'state'; hostId: string; phase: Phase; settings: Settings; players: PlayerInfo[]; round: number }
   /** `remaining`: seconds left from the moment of sending, null when untimed. */
@@ -63,7 +70,7 @@ export type HostMsg =
   /** The round clock changed, e.g. someone guessed and everyone else now has 15 s. */
   | { t: 'timer'; round: number; remaining: number; by: string /* player id */ }
   | { t: 'reveal'; round: number; rounds: number; loc: Loc; results: RoundResult[] }
-  | { t: 'final'; standings: Standing[] }
+  | { t: 'final'; standings: Standing[]; history: RoundRecap[] }
   | { t: 'chat'; name: string; color: string; text: string }
   | { t: 'error'; text: string };
 

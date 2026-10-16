@@ -13,6 +13,9 @@ static files anywhere (GitHub Pages, Netlify, an S3 bucket, `python -m http.serv
 4. Look around the 360° panorama and drive along the road, then drop a pin on the map
    and hit **Guess** (or press Space). Up to 5,000 points per round.
 5. As soon as anyone guesses, everyone else has **15 seconds** left.
+6. After the last round, the **game recap** shows every location and everyone's guesses on
+   one map, with each round's place name, distances, points and winner. Click a round to
+   zoom to it.
 
 Like GeoGuessr, every location is car-mounted street-level imagery: walking, cycling and
 handheld photosphere uploads are filtered out.
@@ -72,6 +75,7 @@ Pushes to `main` are built and published to GitHub Pages by
 ## Credits
 
 Imagery © [Panoramax](https://panoramax.fr) contributors (CC-BY-SA / Etalab licences; the
-photographer and licence are shown after each round). Map data ©
+photographer and licence are shown after each round). Place names in the recap come from
+OpenStreetMap's [Nominatim](https://nominatim.org). Map data ©
 [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors; map style by
 [HOT](https://www.hotosm.org/), hosted by [OSM France](https://openstreetmap.fr/).

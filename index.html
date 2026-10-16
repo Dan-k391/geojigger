@@ -135,17 +135,23 @@
     </section>
 
     <!-- Final -->
-    <section id="screen-final" class="screen center" hidden>
-      <div class="card final-card">
-        <h2>Final standings</h2>
+    <section id="screen-final" class="screen" hidden>
+      <div id="recap-map"></div>
+      <aside class="recap-panel card">
+        <h2>Game recap</h2>
         <ol id="final-list" class="final-list"></ol>
+        <div class="recap-head">
+          <h3>Rounds</h3>
+          <button id="btn-all-rounds" class="btn ghost small-btn">Show all</button>
+        </div>
+        <ol id="recap-rounds" class="recap-rounds"></ol>
         <div class="final-actions">
           <button id="btn-again" class="btn primary big">Play again</button>
           <button id="btn-to-lobby" class="btn">Back to lobby</button>
           <button id="btn-quit" class="btn ghost">Leave</button>
           <p id="final-wait" class="muted">Waiting for the host…</p>
         </div>
-      </div>
+      </aside>
     </section>
 
     <div id="toast" class="toast" hidden></div>
